@@ -44,6 +44,9 @@ from ...utils import (
 )
 from .configuration_marian import MarianConfig
 
+### BFP imports
+from ...bfp.bfp_ops import BFPLinear, BFPConv2d, F_matmul_bfp
+from ...bfp import bfp_util
 
 logger = logging.get_logger(__name__)
 
@@ -153,6 +156,9 @@ class MarianAttention(nn.Module):
         bias: bool = True,
     ):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
@@ -166,10 +172,16 @@ class MarianAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
 
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        #BFP Layers
+        self.k_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.v_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.q_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.out_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -299,6 +311,9 @@ class MarianAttention(nn.Module):
 class MarianEncoderLayer(nn.Module):
     def __init__(self, config: MarianConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = config.d_model
         self.self_attn = MarianAttention(
             embed_dim=self.embed_dim,
@@ -309,8 +324,12 @@ class MarianEncoderLayer(nn.Module):
         self.dropout = config.dropout
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
-        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
-        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+
+        #BFP Layers
+        self.fc1 = BFPLinear(self.embed_dim, config.encoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.encoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def forward(
@@ -368,6 +387,9 @@ class MarianEncoderLayer(nn.Module):
 class MarianDecoderLayer(nn.Module):
     def __init__(self, config: MarianConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+        
         self.embed_dim = config.d_model
 
         self.self_attn = MarianAttention(
@@ -388,8 +410,12 @@ class MarianDecoderLayer(nn.Module):
             is_decoder=True,
         )
         self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-        self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
-        self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+        
+        #BFP Layers
+        self.fc1 = BFPLinear(self.embed_dim, config.decoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.decoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def forward(
@@ -1295,11 +1321,17 @@ class MarianMTModel(MarianPreTrainedModel):
 
     def __init__(self, config: MarianConfig):
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model = MarianModel(config)
 
         target_vocab_size = config.vocab_size if config.share_encoder_decoder_embeddings else config.decoder_vocab_size
         self.register_buffer("final_logits_bias", torch.zeros((1, target_vocab_size)))
-        self.lm_head = nn.Linear(config.d_model, target_vocab_size, bias=False)
+        #self.lm_head = nn.Linear(config.d_model, target_vocab_size, bias=False)
+
+        #BFP Layers
+        self.lm_head = nn.Linear(config.d_model, target_vocab_size, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1558,9 +1590,15 @@ class MarianForCausalLM(MarianPreTrainedModel):
         config.is_decoder = True
         config.is_encoder_decoder = False
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model = MarianDecoderWrapper(config)
 
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        #self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        #BFP Layers
+        self.lm_head = BFPLinear(config.hidden_size, config.vocab_size, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
