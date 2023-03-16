@@ -54,6 +54,9 @@ from ...utils import (
 )
 from .configuration_fsmt import FSMTConfig
 
+### BFP imports
+from ...bfp.bfp_ops import BFPLinear, BFPConv2d, F_matmul_bfp
+from ...bfp import bfp_util
 
 logger = logging.get_logger(__name__)
 
@@ -370,8 +373,12 @@ class PretrainedFSMTModel(PreTrainedModel):
 
 
 def _make_linear_from_emb(emb):
+    #BFP args
+    bfp_args = bfp_util.get_bfp_args()
     vocab_size, emb_size = emb.weight.shape
-    lin_layer = nn.Linear(vocab_size, emb_size, bias=False)
+    #lin_layer = nn.Linear(vocab_size, emb_size, bias=False)
+    #BFP Layer
+    lin_layer = BFPLinear(vocab_size, emb_size, bias=False, **bfp_args)
     lin_layer.weight.data = emb.weight.data
     return lin_layer
 
@@ -409,14 +416,21 @@ def make_padding_mask(input_ids, padding_idx=1):
 class EncoderLayer(nn.Module):
     def __init__(self, config: FSMTConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = config.d_model
         self.self_attn = Attention(self.embed_dim, config.encoder_attention_heads, dropout=config.attention_dropout)
         self.self_attn_layer_norm = LayerNorm(self.embed_dim)
         self.dropout = config.dropout
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
-        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
-        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+
+        #BFP Layers
+        self.fc1 = BFPLinear(self.embed_dim, config.encoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.encoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = LayerNorm(self.embed_dim)
 
     def forward(self, x, encoder_padding_mask, layer_head_mask, output_attentions=False):
@@ -579,6 +593,8 @@ class FSMTEncoder(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(self, config: FSMTConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
         self.embed_dim = config.d_model
 
         self.self_attn = Attention(
@@ -598,8 +614,12 @@ class DecoderLayer(nn.Module):
             encoder_decoder_attention=True,
         )
         self.encoder_attn_layer_norm = LayerNorm(self.embed_dim)
-        self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
-        self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+
+        #BFP Layer
+        self.fc1 = BFPLinear(self.embed_dim, config.decoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.decoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = LayerNorm(self.embed_dim)
 
     def forward(
@@ -675,6 +695,9 @@ class FSMTDecoder(nn.Module):
 
     def __init__(self, config: FSMTConfig, embed_tokens: nn.Embedding):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.dropout = config.dropout
         self.layerdrop = config.decoder_layerdrop
         self.padding_idx = embed_tokens.padding_idx
@@ -695,7 +718,10 @@ class FSMTDecoder(nn.Module):
                 embed_tokens_weight_shape = self.embed_tokens.weight.shape
         else:
             embed_tokens_weight_shape = self.embed_tokens.weight.shape
-        self.output_projection = nn.Linear(embed_tokens_weight_shape[1], embed_tokens_weight_shape[0], bias=False)
+        #self.output_projection = nn.Linear(embed_tokens_weight_shape[1], embed_tokens_weight_shape[0], bias=False)
+
+        #BFP Layers
+        self.output_projection = BFPLinear(embed_tokens_weight_shape[1], embed_tokens_weight_shape[0], bias=False, **self.bfp_args)
         self.output_projection.weight = self.embed_tokens.weight
 
     def forward(
@@ -866,6 +892,8 @@ class Attention(nn.Module):
         encoder_decoder_attention=False,  # otherwise self_attention
     ):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
@@ -874,10 +902,17 @@ class Attention(nn.Module):
         self.scaling = self.head_dim**-0.5
 
         self.encoder_decoder_attention = encoder_decoder_attention
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        #BFP Layers
+        self.k_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.v_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.q_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.out_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+
         self.cache_key = "encoder_decoder" if self.encoder_decoder_attention else "self"
 
     def _shape(self, tensor, seq_len, bsz):
