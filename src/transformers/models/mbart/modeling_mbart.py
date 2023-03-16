@@ -44,6 +44,9 @@ from ...utils import (
 )
 from .configuration_mbart import MBartConfig
 
+### BFP imports
+from ...bfp.bfp_ops import BFPLinear, BFPConv2d, F_matmul_bfp
+from ...bfp import bfp_util
 
 logger = logging.get_logger(__name__)
 
@@ -158,6 +161,9 @@ class MBartAttention(nn.Module):
         bias: bool = True,
     ):
         super().__init__()
+        #BFP args
+        bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
@@ -171,10 +177,16 @@ class MBartAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
 
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        #BFP Layers
+        self.k_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.v_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.q_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.out_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -303,6 +315,9 @@ class MBartAttention(nn.Module):
 class MBartEncoderLayer(nn.Module):
     def __init__(self, config: MBartConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = config.d_model
         self.self_attn = MBartAttention(
             embed_dim=self.embed_dim,
@@ -313,8 +328,13 @@ class MBartEncoderLayer(nn.Module):
         self.dropout = config.dropout
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
-        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
-        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+
+        #BFP Layers
+        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim, **self.bfp_args)
+        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim, **self.bfp_args)
+
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def forward(
@@ -371,6 +391,9 @@ class MBartEncoderLayer(nn.Module):
 class MBartDecoderLayer(nn.Module):
     def __init__(self, config: MBartConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = config.d_model
 
         self.self_attn = MBartAttention(
@@ -391,8 +414,12 @@ class MBartDecoderLayer(nn.Module):
             is_decoder=True,
         )
         self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-        self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
-        self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+
+        #BFP Layers
+        self.fc1 = BFPLinear(self.embed_dim, config.decoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.decoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def forward(
@@ -497,9 +524,16 @@ class MBartClassificationHead(nn.Module):
         pooler_dropout: float,
     ):
         super().__init__()
-        self.dense = nn.Linear(input_dim, inner_dim)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
+        #self.dense = nn.Linear(input_dim, inner_dim)
         self.dropout = nn.Dropout(p=pooler_dropout)
-        self.out_proj = nn.Linear(inner_dim, num_classes)
+        #self.out_proj = nn.Linear(inner_dim, num_classes)
+
+        #BFP Layers
+        self.dense = BFPLinear(input_dim, inner_dim, **self.bfp_args)
+        self.out_proj = BFPLinear(inner_dim, num_classes, **self.bfp_args)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = self.dropout(hidden_states)
@@ -1288,9 +1322,15 @@ class MBartForConditionalGeneration(MBartPreTrainedModel):
 
     def __init__(self, config: MBartConfig):
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model = MBartModel(config)
         self.register_buffer("final_logits_bias", torch.zeros((1, self.model.shared.num_embeddings)))
-        self.lm_head = nn.Linear(config.d_model, self.model.shared.num_embeddings, bias=False)
+        #self.lm_head = nn.Linear(config.d_model, self.model.shared.num_embeddings, bias=False)
+
+        #BFP Layers
+        self.lm_head = BFPLinear(config.d_model, self.model.shared.num_embeddings, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1585,12 +1625,17 @@ class MBartForQuestionAnswering(MBartPreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
 
         config.num_labels = 2
         self.num_labels = config.num_labels
 
         self.model = MBartModel(config)
-        self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
+        #self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
+
+        #BFP Layers
+        self.qa_outputs = BFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
 
         self.model._init_weights(self.qa_outputs)
 
@@ -1723,9 +1768,15 @@ class MBartForCausalLM(MBartPreTrainedModel):
         config.is_decoder = True
         config.is_encoder_decoder = False
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model = MBartDecoderWrapper(config)
 
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        #self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        #BFP Layers
+        self.lm_head = BFPLinear(config.hidden_size, config.vocab_size, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
