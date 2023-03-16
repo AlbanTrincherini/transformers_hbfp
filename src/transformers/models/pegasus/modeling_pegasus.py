@@ -43,6 +43,9 @@ from ...utils import (
 )
 from .configuration_pegasus import PegasusConfig
 
+### BFP imports
+from ...bfp.bfp_ops import BFPLinear, BFPConv2d, F_matmul_bfp
+from ...bfp import bfp_util
 
 logger = logging.get_logger(__name__)
 
@@ -153,6 +156,9 @@ class PegasusAttention(nn.Module):
         bias: bool = True,
     ):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
@@ -166,10 +172,16 @@ class PegasusAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
 
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        #self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+
+        #BFP Layers
+        self.k_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.v_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.q_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
+        self.out_proj = BFPLinear(embed_dim, embed_dim, bias=bias, **self.bfp_args)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -299,6 +311,9 @@ class PegasusAttention(nn.Module):
 class PegasusEncoderLayer(nn.Module):
     def __init__(self, config: PegasusConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.embed_dim = config.d_model
         self.self_attn = PegasusAttention(
             embed_dim=self.embed_dim,
@@ -309,8 +324,12 @@ class PegasusEncoderLayer(nn.Module):
         self.dropout = config.dropout
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
-        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
-        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+
+        #BFP Layers
+        self.fc1 = BFPLinear(self.embed_dim, config.encoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.encoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def forward(
@@ -368,6 +387,8 @@ class PegasusEncoderLayer(nn.Module):
 class PegasusDecoderLayer(nn.Module):
     def __init__(self, config: PegasusConfig):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
         self.embed_dim = config.d_model
 
         self.self_attn = PegasusAttention(
@@ -388,8 +409,12 @@ class PegasusDecoderLayer(nn.Module):
             is_decoder=True,
         )
         self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-        self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
-        self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+        #self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
+        #self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+
+        #BFP Layers
+        self.fc1 = BFPLinear(self.embed_dim, config.decoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.decoder_ffn_dim, self.embed_dim, **self.bfp_args)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 
     def forward(
@@ -1311,9 +1336,15 @@ class PegasusForConditionalGeneration(PegasusPreTrainedModel):
 
     def __init__(self, config: PegasusConfig):
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model = PegasusModel(config)
         self.register_buffer("final_logits_bias", torch.zeros((1, self.model.shared.num_embeddings)))
-        self.lm_head = nn.Linear(config.d_model, self.model.shared.num_embeddings, bias=False)
+        #self.lm_head = nn.Linear(config.d_model, self.model.shared.num_embeddings, bias=False)
+
+        #BFP Layers
+        self.lm_head = BFPLinear(config.d_model, self.model.shared.num_embeddings, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1514,9 +1545,15 @@ class PegasusForCausalLM(PegasusPreTrainedModel):
         config.is_decoder = True
         config.is_encoder_decoder = False
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model = PegasusDecoderWrapper(config)
 
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        #self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        #BFP Layers
+        self.lm_head = BFPLinear(config.hidden_size, config.vocab_size, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
