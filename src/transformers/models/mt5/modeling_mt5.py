@@ -47,6 +47,10 @@ from ...utils.model_parallel_utils import assert_device_map, get_device_map
 from .configuration_mt5 import MT5Config
 
 
+### BFP imports
+from ...bfp.bfp_ops import BFPLinear, BFPConv2d, F_matmul_bfp
+from ...bfp import bfp_util
+
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "MT5Config"
@@ -136,8 +140,16 @@ class MT5LayerNorm(nn.Module):
 class MT5DenseActDense(nn.Module):
     def __init__(self, config: MT5Config):
         super().__init__()
-        self.wi = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
+        #self.wi = nn.Linear(config.d_model, config.d_ff, bias=False)
+        #self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
+
+        #BFP Layers
+        self.wi = BFPLinear(config.d_model, config.d_ff, bias=False, **self.bfp_args)
+        self.wo = BFPLinear(config.d_ff, config.d_model, bias=False, **self.bfp_args)
+
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = ACT2FN[config.dense_act_fn]
 
@@ -159,9 +171,18 @@ class MT5DenseActDense(nn.Module):
 class MT5DenseGatedActDense(nn.Module):
     def __init__(self, config: MT5Config):
         super().__init__()
-        self.wi_0 = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wi_1 = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
+        #self.wi_0 = nn.Linear(config.d_model, config.d_ff, bias=False)
+        #self.wi_1 = nn.Linear(config.d_model, config.d_ff, bias=False)
+        #self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
+
+        #BFP Layers
+        self.wi_0 = BFPLinear(config.d_model, config.d_ff, bias=False, **self.bfp_args)
+        self.wi_1 = BFPLinear(config.d_model, config.d_ff, bias=False, **self.bfp_args)
+        self.wo = BFPLinear(config.d_ff, config.d_model, bias=False, **self.bfp_args)
+
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = ACT2FN[config.dense_act_fn]
 
@@ -208,6 +229,9 @@ class MT5LayerFF(nn.Module):
 class MT5Attention(nn.Module):
     def __init__(self, config: MT5Config, has_relative_attention_bias=False):
         super().__init__()
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+        
         self.is_decoder = config.is_decoder
         self.has_relative_attention_bias = has_relative_attention_bias
         self.relative_attention_num_buckets = config.relative_attention_num_buckets
@@ -219,10 +243,16 @@ class MT5Attention(nn.Module):
         self.inner_dim = self.n_heads * self.key_value_proj_dim
 
         # Mesh TensorFlow initialization to avoid scaling before softmax
-        self.q = nn.Linear(self.d_model, self.inner_dim, bias=False)
-        self.k = nn.Linear(self.d_model, self.inner_dim, bias=False)
-        self.v = nn.Linear(self.d_model, self.inner_dim, bias=False)
-        self.o = nn.Linear(self.inner_dim, self.d_model, bias=False)
+        #self.q = nn.Linear(self.d_model, self.inner_dim, bias=False)
+        #self.k = nn.Linear(self.d_model, self.inner_dim, bias=False)
+        #self.v = nn.Linear(self.d_model, self.inner_dim, bias=False)
+        #self.o = nn.Linear(self.inner_dim, self.d_model, bias=False)
+
+        #BFP Layers
+        self.q = BFPLinear(self.d_model, self.inner_dim, bias=False, **self.bfp_args)
+        self.k = BFPLinear(self.d_model, self.inner_dim, bias=False, **self.bfp_args)
+        self.v = BFPLinear(self.d_model, self.inner_dim, bias=False, **self.bfp_args)
+        self.o = BFPLinear(self.inner_dim, self.d_model, bias=False, **self.bfp_args)
 
         if self.has_relative_attention_bias:
             self.relative_attention_bias = nn.Embedding(self.relative_attention_num_buckets, self.n_heads)
@@ -386,8 +416,9 @@ class MT5Attention(nn.Module):
             hidden_states, self.v, key_value_states, past_key_value[1] if past_key_value is not None else None
         )
 
+        bfp_matmul = F_matmul_bfp(**self.bfp_args)
         # compute scores
-        scores = torch.matmul(
+        scores = bfp_matmul(
             query_states, key_states.transpose(3, 2)
         )  # equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
 
@@ -428,7 +459,7 @@ class MT5Attention(nn.Module):
         if layer_head_mask is not None:
             attn_weights = attn_weights * layer_head_mask
 
-        attn_output = unshape(torch.matmul(attn_weights, value_states))  # (batch_size, seq_length, dim)
+        attn_output = unshape(bfp_matmul(attn_weights, value_states))  # (batch_size, seq_length, dim)
         attn_output = self.o(attn_output)
 
         present_key_value_state = (key_states, value_states) if (self.is_decoder and use_cache) else None
@@ -1555,6 +1586,9 @@ class MT5ForConditionalGeneration(MT5PreTrainedModel):
     # Copied from transformers.models.t5.modeling_t5.T5ForConditionalGeneration.__init__ with T5->MT5
     def __init__(self, config: MT5Config):
         super().__init__(config)
+        ### Add bfp args (*TBC)
+        self.bfp_args = bfp_util.get_bfp_args()
+
         self.model_dim = config.d_model
 
         self.shared = nn.Embedding(config.vocab_size, config.d_model)
@@ -1571,7 +1605,10 @@ class MT5ForConditionalGeneration(MT5PreTrainedModel):
         decoder_config.num_layers = config.num_decoder_layers
         self.decoder = MT5Stack(decoder_config, self.shared)
 
-        self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+        #self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+
+        #BFP Layers
+        self.lm_head = BFPLinear(config.d_model, config.vocab_size, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
