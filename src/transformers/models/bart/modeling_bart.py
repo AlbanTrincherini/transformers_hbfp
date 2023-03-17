@@ -1644,7 +1644,7 @@ class BartForQuestionAnswering(BartPretrainedModel):
         self.model = BartModel(config)
         #self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
         #BFP Layers
-        self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels, **self.bfp_args)
+        self.qa_outputs = BFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
 
         self.model._init_weights(self.qa_outputs)
 

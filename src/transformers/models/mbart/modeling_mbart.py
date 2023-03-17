@@ -332,8 +332,8 @@ class MBartEncoderLayer(nn.Module):
         #self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
 
         #BFP Layers
-        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim, **self.bfp_args)
-        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim, **self.bfp_args)
+        self.fc1 = BFPLinear(self.embed_dim, config.encoder_ffn_dim, **self.bfp_args)
+        self.fc2 = BFPLinear(config.encoder_ffn_dim, self.embed_dim, **self.bfp_args)
 
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
 

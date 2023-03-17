@@ -1331,7 +1331,7 @@ class MarianMTModel(MarianPreTrainedModel):
         #self.lm_head = nn.Linear(config.d_model, target_vocab_size, bias=False)
 
         #BFP Layers
-        self.lm_head = nn.Linear(config.d_model, target_vocab_size, bias=False, **self.bfp_args)
+        self.lm_head = BFPLinear(config.d_model, target_vocab_size, bias=False, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
