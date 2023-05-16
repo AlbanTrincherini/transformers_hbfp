@@ -54,6 +54,7 @@ from .configuration_bert import BertConfig
 ### BFP imports
 from ...bfp.bfp_ops import BFPLinear, BFPConv2d, F_matmul_bfp
 from ...bfp import bfp_util
+from ...outlier_bfp.nn import OutlierBFPLinear
 
 
 logger = logging.get_logger(__name__)
@@ -260,9 +261,9 @@ class BertSelfAttention(nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.query = BFPLinear(config.hidden_size, self.all_head_size, **self.bfp_args)
-        self.key = BFPLinear(config.hidden_size, self.all_head_size, **self.bfp_args)
-        self.value = BFPLinear(config.hidden_size, self.all_head_size, **self.bfp_args)
+        self.query = OutlierBFPLinear(config.hidden_size, self.all_head_size, **self.bfp_args)
+        self.key = OutlierBFPLinear(config.hidden_size, self.all_head_size, **self.bfp_args)
+        self.value = OutlierBFPLinear(config.hidden_size, self.all_head_size, **self.bfp_args)
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
         self.position_embedding_type = position_embedding_type or getattr(
@@ -389,7 +390,7 @@ class BertSelfOutput(nn.Module):
         ### Add bfp args (*TBC)
         self.bfp_args = bfp_util.get_bfp_args()
         
-        self.dense = BFPLinear(config.hidden_size, config.hidden_size, **self.bfp_args)
+        self.dense = OutlierBFPLinear(config.hidden_size, config.hidden_size, **self.bfp_args)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -455,7 +456,7 @@ class BertIntermediate(nn.Module):
         ### Add bfp args (*TBC)
         self.bfp_args = bfp_util.get_bfp_args()
         
-        self.dense = BFPLinear(config.hidden_size, config.intermediate_size, **self.bfp_args)
+        self.dense = OutlierBFPLinear(config.hidden_size, config.intermediate_size, **self.bfp_args)
         if isinstance(config.hidden_act, str):
             self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
@@ -473,7 +474,7 @@ class BertOutput(nn.Module):
         ### Add bfp args (*TBC)
         self.bfp_args = bfp_util.get_bfp_args()
         
-        self.dense = BFPLinear(config.intermediate_size, config.hidden_size, **self.bfp_args)
+        self.dense = OutlierBFPLinear(config.intermediate_size, config.hidden_size, **self.bfp_args)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -673,7 +674,7 @@ class BertPooler(nn.Module):
         ### Add bfp args (*TBC)
         self.bfp_args = bfp_util.get_bfp_args()
         
-        self.dense = BFPLinear(config.hidden_size, config.hidden_size, **self.bfp_args)
+        self.dense = OutlierBFPLinear(config.hidden_size, config.hidden_size, **self.bfp_args)
         self.activation = nn.Tanh()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -691,7 +692,7 @@ class BertPredictionHeadTransform(nn.Module):
         ### Add bfp args (*TBC)
         self.bfp_args = bfp_util.get_bfp_args()
         
-        self.dense = BFPLinear(config.hidden_size, config.hidden_size, **self.bfp_args)
+        self.dense = OutlierBFPLinear(config.hidden_size, config.hidden_size, **self.bfp_args)
         if isinstance(config.hidden_act, str):
             self.transform_act_fn = ACT2FN[config.hidden_act]
         else:
@@ -715,7 +716,7 @@ class BertLMPredictionHead(nn.Module):
 
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
-        self.decoder = BFPLinear(config.hidden_size, config.vocab_size, bias=False, **self.bfp_args)
+        self.decoder = OutlierBFPLinear(config.hidden_size, config.vocab_size, bias=False, **self.bfp_args)
 
         self.bias = nn.Parameter(torch.zeros(config.vocab_size))
 
@@ -744,7 +745,7 @@ class BertOnlyNSPHead(nn.Module):
         ### Add bfp args (*TBC)
         self.bfp_args = bfp_util.get_bfp_args()
         
-        self.seq_relationship = BFPLinear(config.hidden_size, 2, **self.bfp_args)
+        self.seq_relationship = OutlierBFPLinear(config.hidden_size, 2, **self.bfp_args)
 
     def forward(self, pooled_output):
         seq_relationship_score = self.seq_relationship(pooled_output)
@@ -758,7 +759,7 @@ class BertPreTrainingHeads(nn.Module):
         self.bfp_args = bfp_util.get_bfp_args()
         
         self.predictions = BertLMPredictionHead(config)
-        self.seq_relationship = BFPLinear(config.hidden_size, 2, **self.bfp_args)
+        self.seq_relationship = OutlierBFPLinear(config.hidden_size, 2, **self.bfp_args)
 
     def forward(self, sequence_output, pooled_output):
         prediction_scores = self.predictions(sequence_output)
@@ -1564,7 +1565,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
         )
         self.dropout = nn.Dropout(classifier_dropout)
-        self.classifier = BFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
+        self.classifier = OutlierBFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1669,7 +1670,7 @@ class BertForMultipleChoice(BertPreTrainedModel):
             config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
         )
         self.dropout = nn.Dropout(classifier_dropout)
-        self.classifier = BFPLinear(config.hidden_size, 1, **self.bfp_args)
+        self.classifier = OutlierBFPLinear(config.hidden_size, 1, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1771,7 +1772,7 @@ class BertForTokenClassification(BertPreTrainedModel):
             config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
         )
         self.dropout = nn.Dropout(classifier_dropout)
-        self.classifier = BFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
+        self.classifier = OutlierBFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1857,7 +1858,7 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         self.num_labels = config.num_labels
 
         self.bert = BertModel(config, add_pooling_layer=False)
-        self.qa_outputs = BFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
+        self.qa_outputs = OutlierBFPLinear(config.hidden_size, config.num_labels, **self.bfp_args)
 
         # Initialize weights and apply final processing
         self.post_init()
