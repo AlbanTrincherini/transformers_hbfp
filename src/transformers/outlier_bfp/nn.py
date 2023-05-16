@@ -8,7 +8,7 @@ class OutlierBFPLinear(torch.nn.Linear):
         self.bfp_args = bfp_args
         super().__init__(in_features, out_features, bias)
         self.num_format = self.bfp_args['num_format']
-        print(f'New layer! in : {in_features}, out : {out_features}')
+        #print(f'New layer! in : {in_features}, out : {out_features}')
 
     def forward(self, input):
         if self.num_format == 'fp32':
